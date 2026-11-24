@@ -339,7 +339,7 @@ function guardar_(s, p) {
     const enc = sh.getRange('A:A').createTextFinder(id).matchEntireCell(true).findNext();
     if (enc) return { ok: true, duplicado: true, id: id, fila: enc.getRow(), recibido: ahora_() };
     const recepcion = new Date();
-    sh.appendRow([id, fecha, recepcion, s.u, s.nombre].concat(valores, [obs, disp, 1, '']));
+    sh.appendRow([id, fecha, recepcion, txt_(s.u), txt_(s.nombre)].concat(valores.map(celda_), [txt_(obs), txt_(disp), 1, '']));
     SpreadsheetApp.flush();
     return { ok: true, duplicado: false, id: id, fila: sh.getLastRow(), recibido: fmt_(recepcion) };
   } finally {
@@ -427,7 +427,7 @@ function corregir_(s, p) {
     const r = enc.getRow();
     const celda = sh.getRange(r, col);
     const anterior = celda.getValue();
-    celda.setValue(nuevo);
+    celda.setValue(celda_(nuevo));
     const cVer = sh.getRange(r, n + m + 3);
     cVer.setValue((Number(cVer.getValue()) || 1) + 1);
     sh.getRange(r, n + m + 4).setValue(ahora_() + ' por ' + s.u);
@@ -454,9 +454,17 @@ function auditoria_(s, p) {
 }
 
 function auditar_(u, accion, form, id, campo, anterior, nuevo, motivo) {
-  hoja_(H.AUDITORIA).appendRow([new Date(), u, accion, form, id, campo,
-    texto_(anterior, 500, true), texto_(nuevo, 500, true), texto_(motivo, 300, true)]);
+  hoja_(H.AUDITORIA).appendRow([new Date(), txt_(u), txt_(accion), txt_(form), txt_(id), txt_(campo),
+    txt_(texto_(anterior, 500, true)), txt_(texto_(nuevo, 500, true)), txt_(texto_(motivo, 300, true))]);
 }
+
+/** Fuerza texto en la hoja: sin esto, Sheets (configuración regional de Chile) convierte
+ *  textos como "7.5" en fechas. El apóstrofo inicial no se muestra ni se lee de vuelta. */
+function txt_(v) {
+  const s = String(v == null ? '' : v);
+  return s === '' ? '' : "'" + s.replace(/^'/, '');
+}
+function celda_(v) { return typeof v === 'string' ? txt_(v) : v; }
 
 // ───────────────────────── Utilidades ─────────────────────────
 

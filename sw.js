@@ -1,7 +1,7 @@
 /* Service Worker · Plan Infra – Registro Operacional
  * Guarda la "carcasa" de la app para que abra sin conexión.
  * Los envíos al servidor nunca se responden desde caché. */
-const VERSION = 'ro-v1';
+const VERSION = 'ro-v2';
 const ARCHIVOS = ['./', 'index.html', 'styles.css', 'app.js', 'config.js', 'manifest.json',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 

@@ -55,6 +55,7 @@
     } catch (e) {
       if (e.name === 'AbortError') throw new Error('El servidor no respondió a tiempo.');
       if (!navigator.onLine) throw new Error('Sin conexión a Internet.');
+      if (e instanceof TypeError) throw new Error('No se pudo conectar con el servidor.');
       throw e;
     } finally { clearTimeout(t); }
   }

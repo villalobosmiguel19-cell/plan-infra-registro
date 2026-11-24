@@ -132,6 +132,7 @@ function doPost(e) {
 function despachar_(p) {
   if (p.accion === 'usuarios') return { ok: true, usuarios: listaUsuarios_() };
   if (p.accion === 'login') return login_(p);
+  if (p.accion === 'consulta') return consulta_(p);
   const s = sesion_(p.token);
   switch (p.accion) {
     case 'catalogo': return { ok: true, catalogo: catalogo_(s) };
@@ -265,6 +266,27 @@ function validarCodigoNuevo_(c) {
 
 function soloSupervisor_(s) {
   if (s.rol !== 'supervisor') throw falla_('Solo el supervisor puede hacer esto.', 'PERMISO');
+}
+
+// ───────────────────────── Consulta para Plan Infra (solo lectura) ─────────────────────────
+
+/** Plan Infra consulta registros con una clave propia (PLANINFRA_CLAVE, mínimo 16 caracteres).
+ *  Solo lee: no guarda, no corrige y no toca códigos de usuarios. */
+function consulta_(p) {
+  const clave = PropertiesService.getScriptProperties().getProperty('PLANINFRA_CLAVE');
+  const cache = CacheService.getScriptCache();
+  const fallos = Number(cache.get('f_planinfra') || 0);
+  if (fallos >= MAX_FALLOS) throw falla_('Demasiados intentos fallidos. Espera 15 minutos.', 'BLOQUEO');
+  if (!clave || clave.length < 16 || String(p.clave || '') !== clave) {
+    cache.put('f_planinfra', String(fallos + 1), VENTANA_FALLOS);
+    throw falla_('Clave de consulta inválida.', 'CREDENCIALES');
+  }
+  const h = historial_({ u: 'planinfra', rol: 'supervisor', nombre: 'Plan Infra' }, p);
+  const cat = catalogo_({ rol: 'operador' });
+  return {
+    ok: true, total: h.total, registros: h.registros, formularios: cat.formularios,
+    listas: cat.listas, rangos: cat.rangos, usuarios: listaUsuarios_(), consultado: ahora_(),
+  };
 }
 
 // ───────────────────────── Catálogo ─────────────────────────

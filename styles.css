@@ -136,5 +136,9 @@ input:disabled { background: var(--azul-claro); color: var(--texto-2); }
 .chip-serie { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 700; color: var(--c); }
 .chip-serie input { width: 20px; height: 20px; min-height: 0; padding: 0; accent-color: var(--c); -webkit-appearance: checkbox; appearance: auto; }
 .grafico { position: relative; height: 320px; }
+.gcard h2 { font-size: 17px; margin-bottom: 2px; }
+.gcard .resumen { font-size: 13px; color: var(--texto-2); margin: 0 0 6px; }
+.gcard .grafico { height: 260px; }
+.gcard.general .grafico { height: 300px; }
 
 .pie { text-align: center; color: var(--texto-2); font-size: 12px; margin: 0 0 20px; }

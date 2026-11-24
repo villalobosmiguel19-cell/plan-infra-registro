@@ -13,7 +13,7 @@
 const ARCHIVO = 'PLAN_INFRA_REGISTRO_OPERACIONAL';
 const H = {
   USUARIOS: 'Usuarios', CONFIG: 'Config', RANGOS: 'Rangos',
-  CALDERAS: 'Calderas', CLORACION: 'Cloracion', AUDITORIA: 'Auditoria',
+  CALDERAS: 'Calderas', CLORACION: 'Cloracion', AUDITORIA: 'Auditoria', CALDERAS_V1: 'Calderas_v1',
 };
 const SESION_SEG = 21600;            // 6 h; se renueva con cada uso
 const MAX_FALLOS = 8;                // intentos fallidos por usuario…
@@ -21,22 +21,37 @@ const VENTANA_FALLOS = 900;          // …cada 15 minutos
 const MIN_CODIGO = 6;
 const FMT = 'dd-MM-yyyy HH:mm:ss';
 
-// Formularios: [clave, etiqueta, tipo, obligatorio]. tipo: 'num' o 'lista:<LISTA>'.
+// Control de calderas: mismos puntos y parámetros que «Control de Calderas» de Plan Infra.
+const PUNTOS_CALDERA = ['Pozo', 'Filtro', 'Ablandador', 'Alimentación', 'Condensado', 'Caldera 1', 'Caldera 2'];
+const PARAMS_CALDERA = [
+  ['ph', 'pH', ''], ['dureza', 'Dureza', 'ppm'], ['conductividad', 'Conductividad', 'µS/cm'],
+  ['sulfito', 'Sulfito', 'ppm'],
+];
+// Consumo de agua: ítem aparte, un solo punto, ~1 vez al día. No tiene rango: se suma.
+const CONSUMO = { clave: 'consumoAgua', etiqueta: 'Consumo de agua (m³)', grupo: 'Consumo de agua' };
+
+function claveCaldera_(punto, param) {
+  return norm_(punto).replace(/\s+/g, '') + '_' + param;
+}
+
+function camposCalderas_() {
+  const c = [['turno', 'Turno', 'lista:TURNO', true]];
+  PUNTOS_CALDERA.forEach(function (p) {
+    PARAMS_CALDERA.forEach(function (q) {
+      const corto = q[1] + (q[2] ? ' (' + q[2] + ')' : '');
+      // extra: g = grupo (punto), lc = etiqueta corta, s = se suma (no tiene rango)
+      c.push([claveCaldera_(p, q[0]), p + ' · ' + corto, 'num', false, { g: p, lc: corto, s: false }]);
+    });
+  });
+  c.push([CONSUMO.clave, CONSUMO.etiqueta, 'num', false, { g: CONSUMO.grupo, lc: CONSUMO.etiqueta, s: true }]);
+  return c;
+}
+
+// Formularios: [clave, etiqueta, tipo, obligatorio, extra]. tipo: 'num' o 'lista:<LISTA>'.
 const FORMS = {
   calderas: {
-    titulo: 'Control de calderas', hoja: H.CALDERAS, equipo: 'caldera',
-    campos: [
-      ['caldera', 'Caldera', 'lista:CALDERA', true],
-      ['ablandador', 'Ablandador', 'lista:ESTADO_EQUIPO'],
-      ['alimentacion', 'Alimentación', 'lista:ESTADO_EQUIPO'],
-      ['filtro', 'Filtro', 'lista:ESTADO_EQUIPO'],
-      ['pozo', 'Pozo', 'lista:ESTADO_EQUIPO'],
-      ['ph', 'pH', 'num'],
-      ['dureza', 'Dureza (ppm)', 'num'],
-      ['conductividad', 'Conductividad (µS/cm)', 'num'],
-      ['sulfito', 'Sulfito (ppm)', 'num'],
-      ['consumoAgua', 'Consumo de agua (m³)', 'num'],
-    ],
+    titulo: 'Control de calderas', hoja: H.CALDERAS, equipo: 'turno',
+    campos: camposCalderas_(),
   },
   cloracion: {
     titulo: 'Control de cloración', hoja: H.CLORACION, equipo: 'punto',
@@ -133,9 +148,11 @@ function despachar_(p) {
   if (p.accion === 'usuarios') return { ok: true, usuarios: listaUsuarios_() };
   if (p.accion === 'login') return login_(p);
   if (p.accion === 'consulta') return consulta_(p);
+  if (p.accion === 'importar') return importar_(p);
   const s = sesion_(p.token);
   switch (p.accion) {
     case 'catalogo': return { ok: true, catalogo: catalogo_(s) };
+    case 'tendencia': return tendencia_(s, p);
     case 'guardar': return guardar_(s, p);
     case 'historial': return historial_(s, p);
     case 'corregir': return corregir_(s, p);
@@ -289,6 +306,157 @@ function consulta_(p) {
   };
 }
 
+// ───────────────────────── Fusión con «Control de Calderas» (una vez) ─────────────────────────
+
+/** Ejecutar una vez desde el editor. Pasa la hoja Calderas al formato de matriz (7 puntos ×
+ *  5 parámetros + turno) sin perder datos: la hoja anterior queda como «Calderas_v1» y sus
+ *  registros se copian al formato nuevo. Agrega la lista TURNO y las filas de Rangos vacías. */
+function actualizarEstructura() {
+  const ss = SpreadsheetApp.openById(sheetId_());
+  const f = FORMS.calderas;
+  const enc = encabezados_(f);
+  let sh = ss.getSheetByName(H.CALDERAS);
+  if (sh && sh.getLastColumn() > 0) {
+    const actual = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+    if (actual.join('|') !== enc.join('|')) {
+      if (ss.getSheetByName(H.CALDERAS_V1)) throw new Error('Ya existe la hoja ' + H.CALDERAS_V1 + '. Revisar a mano.');
+      sh.setName(H.CALDERAS_V1);
+      sh = null;
+    }
+  }
+  if (!sh) {
+    sh = asegurar_(ss, H.CALDERAS, enc, []);
+    sh.getRange('A:A').setNumberFormat('@');
+    sh.getRange('B:C').setNumberFormat('dd-mm-yyyy hh:mm:ss');
+    Logger.log('Registros del formato anterior copiados: ' + convertirV1_(ss, sh, f));
+  }
+  if (!listas_().TURNO) {
+    const cfg = ss.getSheetByName(H.CONFIG);
+    cfg.getRange(cfg.getLastRow() + 1, 1, 3, 2).setValues([['TURNO', 'Mañana'], ['TURNO', 'Tarde'], ['TURNO', 'Noche']]);
+  }
+  const rg = ss.getSheetByName(H.RANGOS);
+  const existentes = rg.getDataRange().getValues().slice(1).map(function (r) { return norm_(r[0]) + '|' + norm_(r[1]); });
+  const filas = f.campos
+    .filter(function (c) { return c[2] === 'num' && !(c[4] && c[4].s); })
+    .map(function (c) { return ['Calderas', c[1], '', '', '', '']; })
+    .filter(function (r) { return existentes.indexOf(norm_(r[0]) + '|' + norm_(r[1])) === -1; });
+  if (filas.length) rg.getRange(rg.getLastRow() + 1, 1, filas.length, 6).setValues(filas);
+  Logger.log('Estructura lista. Filas de Rangos agregadas: ' + filas.length);
+}
+
+function convertirV1_(ss, nueva, f) {
+  const v1 = ss.getSheetByName(H.CALDERAS_V1);
+  if (!v1 || v1.getLastRow() < 2) return 0;
+  const datos = v1.getDataRange().getValues();
+  const h = datos[0].map(String);
+  const col = function (nombre) { return h.indexOf(nombre); };
+  const mapa = { 'pH': 'ph', 'Dureza (ppm)': 'dureza', 'Conductividad (µS/cm)': 'conductividad',
+    'Sulfito (ppm)': 'sulfito', 'Consumo de agua (m³)': 'consumoAgua' };
+  const filas = [];
+  for (let i = 1; i < datos.length; i++) {
+    const r = datos[i];
+    if (!r[0]) continue;
+    const caldera = String(r[col('Caldera')] || '');
+    const valores = {};
+    Object.keys(mapa).forEach(function (et) {
+      const v = r[col(et)];
+      if (v === '' || !caldera) return;
+      valores[mapa[et] === CONSUMO.clave ? CONSUMO.clave : claveCaldera_(caldera, mapa[et])] = v;
+    });
+    const estados = ['Ablandador', 'Alimentación', 'Filtro', 'Pozo']
+      .filter(function (e) { return r[col(e)] !== ''; })
+      .map(function (e) { return e + ': ' + r[col(e)]; }).join('; ');
+    const obs = (estados ? '[Formato anterior] ' + estados + '. ' : '') + String(r[col('Observaciones')] || '');
+    filas.push([r[0], r[1], r[2], txt_(r[3]), txt_(r[4])]
+      .concat(f.campos.map(function (c) { return c[0] === 'turno' ? '' : (valores[c[0]] !== undefined ? valores[c[0]] : ''); }),
+        [txt_(obs.trim()), txt_(r[col('Dispositivo')]), r[col('Versión')] || 1, txt_(r[col('Última corrección')])]));
+  }
+  if (filas.length) nueva.getRange(2, 1, filas.length, filas[0].length).setValues(filas);
+  auditar_('sistema', 'Cambio de formato', 'calderas', '', 'Registros copiados desde Calderas_v1', '', String(filas.length), '');
+  return filas.length;
+}
+
+/** Ejecutar una vez desde el editor. Saca el consumo de agua de los 7 puntos y lo deja como un
+ *  solo ítem. Sin perder datos: la hoja actual queda como «Calderas_v2» y se copia fila por fila
+ *  al formato nuevo (el consumo se toma del punto que lo tenga; si hay más de uno, se avisa). */
+function separarConsumo() {
+  const ss = SpreadsheetApp.openById(sheetId_());
+  const f = FORMS.calderas;
+  const enc = encabezados_(f);
+  const actual = ss.getSheetByName(H.CALDERAS);
+  const viejo = actual.getRange(1, 1, 1, actual.getLastColumn()).getValues()[0].map(String);
+  if (viejo.join('|') === enc.join('|')) { Logger.log('La hoja ya tiene el formato nuevo.'); return; }
+  if (ss.getSheetByName('Calderas_v2')) throw new Error('Ya existe la hoja Calderas_v2. Revisar a mano.');
+  const datos = actual.getDataRange().getValues();
+  actual.setName('Calderas_v2');
+  const nueva = asegurar_(ss, H.CALDERAS, enc, []);
+  nueva.getRange('A:A').setNumberFormat('@');
+  nueva.getRange('B:C').setNumberFormat('dd-mm-yyyy hh:mm:ss');
+  const colConsumo = viejo.map(function (h, i) { return /Consumo de agua/.test(h) ? i : -1; }).filter(function (i) { return i >= 0; });
+  let conflictos = 0;
+  const filas = datos.slice(1).filter(function (r) { return r[0]; }).map(function (r) {
+    return enc.map(function (h, j) {
+      let v;
+      if (h === CONSUMO.etiqueta) {
+        const con = colConsumo.map(function (i) { return r[i]; }).filter(function (x) { return x !== ''; });
+        if (con.length > 1) conflictos++;
+        v = con.length ? con[0] : '';
+      } else {
+        const i = viejo.indexOf(h);
+        v = i >= 0 ? r[i] : '';
+      }
+      // Textos (usuario, operador, turno, observaciones, dispositivo, corrección) como texto.
+      return typeof v === 'string' && v !== '' && j !== 0 ? txt_(v) : v;
+    });
+  });
+  if (filas.length) nueva.getRange(2, 1, filas.length, enc.length).setValues(filas);
+  auditar_('sistema', 'Cambio de formato', 'calderas', '', 'Consumo de agua como ítem aparte (respaldo en Calderas_v2)',
+    '', String(filas.length), conflictos ? conflictos + ' registro(s) con consumo en más de un punto: se tomó el primero' : '');
+  Logger.log('Copiados ' + filas.length + ' registros. Registros con consumo en más de un punto: ' + conflictos);
+}
+
+/** Importación única del histórico de Plan Infra. Requiere PLANINFRA_CLAVE y la propiedad
+ *  IMPORTACION_HABILITADA = SI (se borra al terminar). IDs fijos «PI-<id>»: nunca duplica. */
+function importar_(p) {
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty('IMPORTACION_HABILITADA') !== 'SI') throw falla_('La importación no está habilitada.', 'PERMISO');
+  const clave = props.getProperty('PLANINFRA_CLAVE');
+  if (!clave || String(p.clave || '') !== clave) throw falla_('Clave de consulta inválida.', 'CREDENCIALES');
+  if (p.form !== 'calderas') throw falla_('Solo se importa el formulario de calderas.');
+  const f = FORMS.calderas;
+  const lista = Array.isArray(p.registros) ? p.registros.slice(0, 200) : [];
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) throw falla_('Servidor ocupado. Reintenta.', 'OCUPADO');
+  try {
+    const sh = hoja_(f.hoja);
+    const ids = {};
+    if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues().forEach(function (r) { ids[String(r[0])] = true; });
+    const filas = [];
+    let omitidos = 0;
+    lista.forEach(function (r) {
+      const id = String(r.id || '');
+      if (!/^PI-\d+$/.test(id)) throw falla_('ID inválido: ' + id);
+      if (ids[id]) { omitidos++; return; }
+      const fecha = fecha_(r.fechaRegistro);
+      if (!fecha) throw falla_('Fecha inválida en ' + id);
+      const vals = f.campos.map(function (c) {
+        if (c[0] === 'turno') return txt_(texto_(r.turno, 20, false));
+        const v = r.valores ? r.valores[c[0]] : undefined;
+        return typeof v === 'number' && isFinite(v) ? v : '';
+      });
+      filas.push([id, fecha, new Date(), txt_('historico'), txt_(texto_(r.operador, 60, false))]
+        .concat(vals, [txt_(texto_(r.observaciones, 1000, true)), txt_('Migración Plan Infra'), 1, '']));
+      ids[id] = true;
+    });
+    if (filas.length) sh.getRange(sh.getLastRow() + 1, 1, filas.length, filas[0].length).setValues(filas);
+    auditar_('plan_infra', 'Importación histórico', 'calderas', '', 'Registros importados', '', String(filas.length),
+      'Desde Control de Calderas de Plan Infra');
+    return { ok: true, importados: filas.length, omitidos: omitidos };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 // ───────────────────────── Catálogo ─────────────────────────
 
 function listas_() {
@@ -326,7 +494,9 @@ function catalogo_(s) {
     formularios[k] = {
       titulo: f.titulo, equipo: f.equipo,
       campos: f.campos.map(function (c) {
-        return { k: c[0], l: c[1], t: c[2].split(':')[0], lista: c[2].split(':')[1] || '', req: !!c[3] };
+        const x = c[4] || {};
+        return { k: c[0], l: c[1], t: c[2].split(':')[0], lista: c[2].split(':')[1] || '', req: !!c[3],
+          g: x.g || '', lc: x.lc || '', s: !!x.s };
       }),
     };
   });
@@ -387,10 +557,25 @@ function valorCampo_(c, v, listas) {
 function historial_(s, p) {
   const f = FORMS[p.form];
   if (!f) throw falla_('Formulario desconocido.');
-  const desde = p.desde ? fecha_(p.desde + 'T00:00') : null;
-  const hasta = p.hasta ? fecha_(p.hasta + 'T23:59') : null;
   const operador = s.rol === 'supervisor' ? String(p.operador || '').toLowerCase() : s.u;
-  const equipo = String(p.equipo || '');
+  const out = filtrar_(f, p.desde, p.hasta, operador, String(p.equipo || ''));
+  return { ok: true, total: out.length, registros: out.slice(0, 500) };
+}
+
+/** Gráficos de tendencia: todos los registros de la planta en el período (orden cronológico). */
+function tendencia_(s, p) {
+  const f = FORMS[p.form];
+  if (!f) throw falla_('Formulario desconocido.');
+  const out = filtrar_(f, p.desde, p.hasta, '', '').slice(0, 3000).reverse();
+  return {
+    ok: true, total: out.length, rangos: rangos_(),
+    registros: out.map(function (r) { return { fecha: r.fecha, orden: r.orden, valores: r.valores }; }),
+  };
+}
+
+function filtrar_(f, desdeTxt, hastaTxt, operador, equipo) {
+  const desde = desdeTxt ? fecha_(desdeTxt + 'T00:00') : null;
+  const hasta = hastaTxt ? fecha_(hastaTxt + 'T23:59') : null;
   const v = hoja_(f.hoja).getDataRange().getValues();
   const n = PRE.length, out = [];
   for (let i = 1; i < v.length; i++) {
@@ -404,7 +589,7 @@ function historial_(s, p) {
     out.push(fila_(f, row, i + 1));
   }
   out.sort(function (a, b) { return a.orden < b.orden ? 1 : -1; });
-  return { ok: true, total: out.length, registros: out.slice(0, 500) };
+  return out;
 }
 
 function fila_(f, row, nFila) {

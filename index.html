@@ -107,14 +107,23 @@
           <button type="button" data-gform="calderas" class="activo">Calderas</button>
           <button type="button" data-gform="cloracion">Cloración</button>
         </div>
-        <div class="campo"><label for="g-param">Parámetro</label><select id="g-param"></select></div>
-        <div class="fila2">
-          <div class="campo"><label for="g-desde">Desde</label><input id="g-desde" type="date"></div>
-          <div class="campo"><label for="g-hasta">Hasta</label><input id="g-hasta" type="date"></div>
+        <div id="g-ctl-cal" class="fila2">
+          <div class="campo"><label for="g-limite">Registros</label>
+            <select id="g-limite"><option value="30">Últimos 30</option><option value="60">Últimos 60</option>
+              <option value="90">Últimos 90</option><option value="total">Total histórico</option></select></div>
+          <div class="campo"><label for="g-punto">Punto de medición</label><select id="g-punto"></select></div>
         </div>
-        <button class="boton" type="submit">VER GRÁFICO</button>
+        <div id="g-ctl-clo">
+          <div class="campo"><label for="g-param">Parámetro</label><select id="g-param"></select></div>
+          <div class="fila2">
+            <div class="campo"><label for="g-desde">Desde</label><input id="g-desde" type="date"></div>
+            <div class="campo"><label for="g-hasta">Hasta</label><input id="g-hasta" type="date"></div>
+          </div>
+        </div>
+        <button class="boton" type="submit">VER GRÁFICOS</button>
         <div id="g-estado" class="estado"></div>
       </form>
+      <div id="g-panel" class="oculto"></div>
       <div id="g-res" class="tarjeta oculto">
         <div id="g-series" class="series"></div>
         <div class="grafico"><canvas id="g-canvas"></canvas></div>

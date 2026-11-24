@@ -14,10 +14,18 @@
   const $ = (id) => document.getElementById(id);
   const st = { sesion: null, cat: null, form: null, histForm: 'calderas', hist: [], detalle: null, ultimoId: null, sinc: false, errorSync: '' };
 
-  // ── Almacenamiento local (puede fallar en modo privado) ──
-  const leer = (k, def) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch (e) { return def; } };
-  const guardar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } };
-  const borrar = (k) => { try { localStorage.removeItem(k); } catch (e) { /* nada */ } };
+  // ── Almacenamiento local ──
+  // Si el teléfono no deja guardar (modo privado, navegador dentro de otra app, sin espacio),
+  // los datos quedan en memoria mientras la app esté abierta y se envían igual al servidor.
+  const memoria = {};
+  const leer = (k, def) => {
+    if (Object.prototype.hasOwnProperty.call(memoria, k)) return memoria[k];
+    try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch (e) { return def; }
+  };
+  const guardar = (k, v) => {
+    try { localStorage.setItem(k, JSON.stringify(v)); delete memoria[k]; return true; } catch (e) { memoria[k] = v; st.sinAlmacen = true; return false; }
+  };
+  const borrar = (k) => { delete memoria[k]; try { localStorage.removeItem(k); } catch (e) { /* nada */ } };
 
   function uuid() {
     if (crypto.randomUUID) return crypto.randomUUID();
@@ -159,7 +167,7 @@
         return '<div class="campo">' + lbl + '<select id="' + id + '" data-k="' + c.k + '"><option value="">Selecciona…</option>' + ops + '</select></div>';
       }
       return '<div class="campo">' + lbl + '<input id="' + id + '" data-k="' + c.k + '" type="text" inputmode="decimal" maxlength="20" autocomplete="off">' +
-        '<span class="ayuda" id="a_' + c.k + '">' + (c.s ? 'Se suma en los gráficos' : '') + '</span><span class="aviso oculto" id="w_' + c.k + '"></span></div>';
+        '<span class="ayuda" id="a_' + c.k + '">' + (c.s ? 'Un solo punto, aprox. una vez al día · se suma en los gráficos' : '') + '</span><span class="aviso oculto" id="w_' + c.k + '"></span></div>';
     };
     // Los campos con grupo (punto de medición) se agrupan en un recuadro por punto.
     let html = '', grupo = '';
@@ -227,10 +235,11 @@
     reg.dispositivo = dispositivo();
     const cola = leer(K.cola, []);
     cola.push({ form: st.form, usuario: st.sesion.usuario, nombre: st.sesion.nombre, creado: new Date().toISOString(), registro: reg });
-    if (!guardar(K.cola, cola)) { estado('r-estado', 'error', 'No se pudo guardar en el teléfono.', 'Revisa el espacio disponible. El registro NO se envió.'); return; }
+    const copiaLocal = guardar(K.cola, cola);
     borrar(K.bor + st.form);
     st.ultimoId = reg.id;
-    estado('r-estado', 'enviando', 'Enviando…', 'Esperando confirmación del servidor.');
+    estado('r-estado', 'enviando', 'Enviando…', copiaLocal ? 'Esperando confirmación del servidor.'
+      : 'Este teléfono no permite guardar una copia local: no cierres la app hasta ver «Registro guardado correctamente».');
     // Dejar el formulario listo para el siguiente registro (los datos ya están en la cola).
     f.campos.forEach((c) => { if (c.t === 'num' || !c.req) $('c_' + c.k).value = ''; });
     $('r-obs').value = ''; $('r-fecha').value = ahoraLocal(); revisarRangos();
@@ -256,7 +265,9 @@
         try { r = await api('guardar', { form: item.form, registro: item.registro }); }
         catch (e) {
           st.errorSync = e.message;
-          if (item.registro.id === st.ultimoId) estado('r-estado', 'pendiente', 'Pendiente de sincronización', e.message + ' El registro está guardado SOLO en este teléfono y se enviará automáticamente.');
+          if (item.registro.id === st.ultimoId) estado('r-estado', 'pendiente', 'Pendiente de sincronización', e.message + (st.sinAlmacen
+            ? ' El registro está SOLO en la memoria de la app: no la cierres; se reintentará automáticamente.'
+            : ' El registro está guardado SOLO en este teléfono y se enviará automáticamente.'));
           break;
         }
         if (r.ok) {
@@ -392,14 +403,157 @@
   function prepararGraficos() {
     st.gForm = st.gForm || 'calderas';
     document.querySelectorAll('#f-graf .seg button').forEach((b) => b.classList.toggle('activo', b.dataset.gform === st.gForm));
+    const panel = esPanel(st.gForm);
+    $('g-ctl-cal').classList.toggle('oculto', !panel);
+    $('g-ctl-clo').classList.toggle('oculto', panel);
+    $('g-panel').classList.add('oculto');
+    $('g-res').classList.add('oculto');
+    if (panel) {
+      const actual = $('g-punto').value;
+      $('g-punto').innerHTML = '<option value="todos">Todos los puntos</option>' +
+        puntosPanel(st.gForm).map((p) => '<option>' + esc(p) + '</option>').join('');
+      if (actual) $('g-punto').value = actual;
+    }
     $('g-param').innerHTML = parametrosDe(st.gForm).map((p, i) => '<option value="' + i + '">' + esc(p.etiqueta) + (p.suma ? ' · acumulado' : '') + '</option>').join('');
     if (!$('g-desde').value) $('g-desde').value = hoyMenos(30);
     if (!$('g-hasta').value) $('g-hasta').value = hoyMenos(0);
     st.gOcultas = new Set();
   }
 
+  // ── Panel de calderas: mismos gráficos que «Control de Calderas» de Plan Infra ──
+  // Formularios con campos agrupados por punto (calderas) usan el panel completo.
+  const esPanel = (form) => st.cat.formularios[form].campos.some((c) => c.g && !c.s);
+  const puntosPanel = (form) => Array.from(new Set(st.cat.formularios[form].campos.filter((c) => c.g && !c.s).map((c) => c.g)));
+  let panelGraficos = [];
+
+  async function verPanel() {
+    estado('g-estado', 'enviando', 'Cargando datos…');
+    try {
+      await cargarChartJs();
+      // Se pide todo el historial: el totalizador de consumo acumula desde el primer registro.
+      const r = await api('tendencia', { form: st.gForm });
+      if (!r.ok) { estado('g-estado', 'error', r.error || 'No se pudo cargar.'); return; }
+      estado('g-estado');
+      st.panel = r;
+      pintarPanel();
+    } catch (e) { estado('g-estado', 'error', 'No se pudieron cargar los gráficos.', e.message); }
+  }
+
+  function pintarPanel() {
+    const r = st.panel;
+    if (!r) return;
+    const form = st.gForm;
+    const f = st.cat.formularios[form];
+    const num = (v) => (v === '' || v == null || isNaN(Number(v)) ? null : Number(v));
+    const fmt = (v, d) => (v == null || !isFinite(v) ? '—' : Number(v).toLocaleString('es-CL', { maximumFractionDigits: d == null ? 2 : d }));
+    const todos = r.registros;
+    const consumo = f.campos.find((c) => c.s);
+    // Totalizador: acumulado sobre todo el historial, antes de recortar a los últimos N.
+    let acc = 0, hay = false;
+    const acumTodos = todos.map((x) => { const v = consumo ? num(x.valores[consumo.k]) : null; if (v !== null) { acc += v; hay = true; } return hay ? acc : null; });
+    const lim = $('g-limite').value;
+    const desde = lim === 'total' ? 0 : Math.max(0, todos.length - Number(lim));
+    const regs = todos.slice(desde);
+    const acum = acumTodos.slice(desde);
+    const etiquetas = regs.map((x) => x.fecha.slice(0, 16));
+    const sel = $('g-punto').value;
+    const puntos = puntosPanel(form).filter((p) => sel === 'todos' || p === sel);
+    const params = parametrosDe(form).filter((p) => !p.suma);
+    const tituloTip = (items) => { const x = regs[items[0].dataIndex]; return x.fecha.slice(0, 16) + (x.valores.turno ? ' · ' + x.valores.turno : ''); };
+    const ejeX = { ticks: { maxTicksLimit: 5, maxRotation: 0, callback: function (v) { return String(this.getLabelForValue(v)).slice(0, 5); } } };
+
+    panelGraficos.forEach((g) => g.destroy());
+    panelGraficos = [];
+    const tarjeta = (id, titulo, nota, clase) => '<div class="tarjeta gcard ' + (clase || '') + '"><h2>' + esc(titulo) + '</h2><p class="resumen" id="' + id + '-r"></p>' +
+      (nota ? '<p class="nota">' + esc(nota) + '</p>' : '') + '<div class="grafico"><canvas id="' + id + '"></canvas></div></div>';
+    let html = '<p class="total">' + regs.length + ' de ' + todos.length + ' registros' + (lim === 'total' ? ' (todo el historial)' : '') + '</p>';
+    html += tarjeta('gp-general', 'Resumen general de parámetros', 'Tendencia normalizada (0 a 1) para comparar parámetros con distintas unidades. Cada línea es el promedio de los puntos elegidos; el consumo se muestra acumulado.', 'general');
+    params.forEach((p, i) => { html += tarjeta('gp-p' + i, p.etiqueta, ''); });
+    if (consumo) {
+      html += tarjeta('gp-tot', 'Consumo de agua · Totalizador (m³)', 'Total acumulado desde el primer registro.');
+      html += tarjeta('gp-con', 'Consumo por registro y tendencia (m³)', 'Cuánto se consumió en cada registro; la línea punteada es el promedio de los últimos 7 registros con consumo.');
+    }
+    $('g-panel').innerHTML = html;
+    $('g-panel').classList.remove('oculto');
+    $('g-res').classList.add('oculto');
+
+    const nuevo = (id, datasets, opciones) => {
+      panelGraficos.push(new window.Chart($(id), {
+        type: 'line', data: { labels: etiquetas, datasets: datasets },
+        options: Object.assign({ responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: 'index', intersect: false } }, opciones),
+      }));
+    };
+    const linea = (label, data, color, extra) => Object.assign({ label: label, data: data, borderColor: color, backgroundColor: color,
+      borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, tension: 0.18, spanGaps: true }, extra || {});
+    const promedio = (p) => regs.map((x) => {
+      const vs = p.series.filter((s) => puntos.indexOf(s.nombre) >= 0).map((s) => num(x.valores[s.clave])).filter((v) => v !== null);
+      return vs.length ? vs.reduce((a, b) => a + b, 0) / vs.length : null;
+    });
+
+    // 1) Resumen general normalizado
+    const generales = params.map((p) => ({ etiqueta: p.etiqueta, valores: promedio(p) }));
+    if (consumo) generales.push({ etiqueta: 'Consumo de agua (acumulado)', valores: acum });
+    const dsGeneral = generales.filter((g) => g.valores.some((v) => v !== null)).map((g, i) => {
+      const pres = g.valores.filter((v) => v !== null);
+      const mn = Math.min.apply(null, pres), mx = Math.max.apply(null, pres);
+      return linea(g.etiqueta, g.valores.map((v) => (v === null ? null : (mx === mn ? 0.5 : (v - mn) / (mx - mn)))), COLORES[i % COLORES.length], { crudos: g.valores });
+    });
+    $('gp-general-r').textContent = dsGeneral.length ? (sel === 'todos' ? 'Promedio de todos los puntos' : 'Punto: ' + sel) : 'Sin datos para graficar.';
+    nuevo('gp-general', dsGeneral, {
+      scales: { x: ejeX, y: { min: 0, max: 1, title: { display: true, text: 'Índice normalizado' } } },
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } }, tooltip: { filter: (it) => it.raw !== null, callbacks: { title: tituloTip,
+        label: (c) => c.dataset.label + ': ' + fmt(c.dataset.crudos[c.dataIndex]) + ' · índice ' + fmt(c.raw, 3) } } },
+    });
+
+    // 2) Un gráfico por parámetro, una línea por punto (rojo = fuera del rango configurado)
+    params.forEach((p, i) => {
+      const series = p.series.filter((s) => puntos.indexOf(s.nombre) >= 0);
+      const ds = [];
+      series.forEach((s) => {
+        const color = COLORES[puntosPanel(form).indexOf(s.nombre) % COLORES.length];
+        const vals = regs.map((x) => num(x.valores[s.clave]));
+        const rg = rangoDe(form, s.clave, '');
+        const colores = vals.map((v) => (rg && v !== null && ((rg.min != null && v < rg.min) || (rg.max != null && v > rg.max)) ? '#B3261E' : color));
+        if (vals.some((v) => v !== null)) ds.push(linea(s.nombre, vals, color, { pointBackgroundColor: colores, pointBorderColor: colores }));
+        if (rg && series.length === 1) {
+          if (rg.min != null) ds.push(linea('Mínimo', etiquetas.map(() => rg.min), '#B3261E', { borderDash: [6, 4], pointRadius: 0, borderWidth: 1.5 }));
+          if (rg.max != null) ds.push(linea('Máximo', etiquetas.map(() => rg.max), '#B3261E', { borderDash: [6, 4], pointRadius: 0, borderWidth: 1.5 }));
+        }
+      });
+      const prom = promedio(p).filter((v) => v !== null);
+      const ult = prom[prom.length - 1], ant = prom[prom.length - 2];
+      $('gp-p' + i + '-r').textContent = !prom.length ? 'Sin mediciones en estos registros.'
+        : 'Último promedio: ' + fmt(ult) + (ant != null ? ' · ' + (ult - ant > 0 ? '+' : '') + fmt(ult - ant) + ' vs. anterior' : '');
+      nuevo('gp-p' + i, ds, {
+        scales: { x: ejeX, y: { title: { display: true, text: p.etiqueta } } },
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, usePointStyle: true } }, tooltip: { filter: (it) => it.raw !== null, callbacks: { title: tituloTip } } },
+      });
+    });
+
+    // 3) Consumo: totalizador y consumo por registro con tendencia
+    if (consumo) {
+      const porReg = regs.map((x) => num(x.valores[consumo.k]));
+      const conDatos = [];
+      const media = porReg.map((v) => { if (v === null) return null; conDatos.push(v); const u = conDatos.slice(-7); return u.reduce((a, b) => a + b, 0) / u.length; });
+      const totalAct = acum.filter((v) => v !== null).pop();
+      const ultimo = porReg.filter((v) => v !== null).pop();
+      $('gp-tot-r').textContent = totalAct == null ? 'Sin mediciones de consumo.' : 'Totalizador: ' + fmt(totalAct) + ' m³';
+      $('gp-con-r').textContent = ultimo == null ? 'Sin mediciones de consumo en estos registros.' : 'Último registro: ' + fmt(ultimo) + ' m³';
+      nuevo('gp-tot', [linea('Totalizador', acum, COLORES[0])], {
+        scales: { x: ejeX, y: { beginAtZero: true, title: { display: true, text: 'm³ acumulados' } } },
+        plugins: { legend: { display: false }, tooltip: { filter: (it) => it.raw !== null, callbacks: { title: tituloTip, label: (c) => 'Totalizador: ' + fmt(c.raw) + ' m³' } } },
+      });
+      nuevo('gp-con', [linea('Consumo del registro', porReg, COLORES[1], { pointRadius: 3 }),
+        linea('Tendencia (prom. 7)', media, COLORES[3], { borderDash: [5, 4], pointRadius: 0 })], {
+        scales: { x: ejeX, y: { beginAtZero: true, title: { display: true, text: 'm³ por registro' } } },
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 10 } }, tooltip: { filter: (it) => it.raw !== null, callbacks: { title: tituloTip, label: (c) => c.dataset.label + ': ' + fmt(c.raw) + ' m³' } } },
+      });
+    }
+  }
+
   async function verGrafico(ev) {
     if (ev) ev.preventDefault();
+    if (esPanel(st.gForm)) { verPanel(); return; }
     const form = st.gForm;
     const p = parametrosDe(form)[Number($('g-param').value) || 0];
     estado('g-estado', 'enviando', 'Cargando datos…');
@@ -591,7 +745,7 @@
     document.addEventListener('click', (ev) => {
       const t = ev.target.closest('[data-ir],[data-ver],[data-descartar],[data-form],[data-gform]');
       if (!t) return;
-      if (t.dataset.gform) { st.gForm = t.dataset.gform; st.gDatos = null; prepararGraficos(); $('g-res').classList.add('oculto'); return; }
+      if (t.dataset.gform) { st.gForm = t.dataset.gform; st.gDatos = null; st.panel = null; prepararGraficos(); return; }
       if (t.dataset.ir) ir(t.dataset.ir);
       else if (t.dataset.ver) verDetalle(st.hist[Number(t.dataset.ver)]);
       else if (t.dataset.descartar) {
@@ -611,6 +765,8 @@
       st.gOcultas = new Set();
       pintarGrafico();
     });
+    $('g-limite').addEventListener('change', () => { if (st.panel) pintarPanel(); });
+    $('g-punto').addEventListener('change', () => { if (st.panel) pintarPanel(); });
     $('g-series').addEventListener('change', (ev) => {
       const n = ev.target.dataset.serie;
       if (!n) return;

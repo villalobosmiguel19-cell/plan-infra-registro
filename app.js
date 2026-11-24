@@ -134,7 +134,8 @@
     const n = colaDe().length;
     if (n && !confirm('Tienes ' + n + ' registro(s) sin sincronizar. Se conservarán en este teléfono y se enviarán cuando vuelvas a ingresar. ¿Cerrar sesión?')) return;
     try { await api('salir'); } catch (e) { /* se cierra igual */ }
-    st.sesion = null; borrar(K.ses); ir('login');
+    // Al salir se borra también el catálogo guardado (puede traer datos del supervisor).
+    st.sesion = null; borrar(K.ses); borrar(K.cat); st.cat = null; ir('login');
   }
 
   function pintarInicio() {
@@ -142,7 +143,8 @@
     $('i-rol').textContent = st.sesion.rol === 'supervisor' ? 'Supervisor' : 'Operador';
     const n = colaDe().length;
     $('i-pend').textContent = n ? String(n) : '';
-    const hoja = st.cat && st.cat.hojaUrl;
+    // La hoja de cálculo solo para el supervisor (los operadores no ven el acceso).
+    const hoja = st.sesion.rol === 'supervisor' && st.cat && st.cat.hojaUrl;
     $('i-hoja').classList.toggle('oculto', !hoja);
     if (hoja) $('i-hoja').href = hoja;
   }

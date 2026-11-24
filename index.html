@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Plan Infra – Registro Operacional</title>
+  <meta name="theme-color" content="#0B2545">
+  <meta name="robots" content="noindex">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Registro Op.">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="barra">
+    <div class="logo" aria-hidden="true">PI</div>
+    <div class="marca"><b>PLAN INFRA</b><span>REGISTRO OPERACIONAL</span></div>
+    <span id="conexion" class="conexion">EN LÍNEA</span>
+  </header>
+  <button id="sync" class="sync oculto" type="button"></button>
+
+  <main>
+    <!-- Ingreso -->
+    <section id="v-login" class="vista" hidden>
+      <form id="f-login" class="tarjeta" autocomplete="off" novalidate>
+        <h1>Ingreso</h1>
+        <div class="campo">
+          <label for="l-usuario">Operador</label>
+          <select id="l-usuario" required><option value="">Cargando…</option></select>
+        </div>
+        <div class="campo">
+          <label for="l-codigo">Código de acceso</label>
+          <input id="l-codigo" type="password" maxlength="64" autocomplete="current-password" required>
+        </div>
+        <button class="boton" type="submit">INGRESAR</button>
+        <div id="l-estado" class="estado"></div>
+      </form>
+    </section>
+
+    <!-- Inicio -->
+    <section id="v-inicio" class="vista" hidden>
+      <p class="saludo">Hola, <b id="i-nombre"></b> <span id="i-rol" class="chip"></span></p>
+      <div class="menu">
+        <button class="mbtn" data-ir="calderas" type="button"><span class="ico">♨</span>Control de calderas</button>
+        <button class="mbtn" data-ir="cloracion" type="button"><span class="ico">⚗</span>Control de cloración</button>
+        <button class="mbtn sec" data-ir="historial" type="button"><span class="ico">☰</span>Historial</button>
+        <button class="mbtn sec" data-ir="pendientes" type="button"><span class="ico">⟳</span>Pendientes <b id="i-pend"></b></button>
+        <button class="mbtn sec" data-ir="cuenta" type="button"><span class="ico">⚿</span>Mi cuenta</button>
+        <a id="i-hoja" class="mbtn sec oculto" target="_blank" rel="noopener"><span class="ico">▦</span>Abrir hoja de cálculo</a>
+      </div>
+      <button id="b-salir" class="boton secundario" type="button">Cerrar sesión</button>
+    </section>
+
+    <!-- Formulario de registro (se arma desde el catálogo del servidor) -->
+    <section id="v-form" class="vista" hidden>
+      <button class="volver" data-ir="inicio" type="button">‹ Inicio</button>
+      <form id="f-reg" class="tarjeta" novalidate autocomplete="off">
+        <h1 id="r-titulo"></h1>
+        <div class="campo">
+          <label for="r-fecha">Fecha y hora</label>
+          <input id="r-fecha" type="datetime-local" required>
+        </div>
+        <div class="campo"><label>Operador</label><input id="r-operador" type="text" disabled></div>
+        <div id="r-campos"></div>
+        <div class="campo">
+          <label for="r-obs">Observaciones</label>
+          <textarea id="r-obs" maxlength="1000"></textarea>
+        </div>
+        <button class="boton" type="submit">ENVIAR REGISTRO</button>
+        <div id="r-estado" class="estado"></div>
+      </form>
+    </section>
+
+    <!-- Historial -->
+    <section id="v-historial" class="vista" hidden>
+      <button class="volver" data-ir="inicio" type="button">‹ Inicio</button>
+      <form id="f-hist" class="tarjeta" novalidate>
+        <h1>Historial</h1>
+        <div class="seg" role="tablist">
+          <button type="button" data-form="calderas" class="activo">Calderas</button>
+          <button type="button" data-form="cloracion">Cloración</button>
+        </div>
+        <div class="fila2">
+          <div class="campo"><label for="h-desde">Desde</label><input id="h-desde" type="date"></div>
+          <div class="campo"><label for="h-hasta">Hasta</label><input id="h-hasta" type="date"></div>
+        </div>
+        <div class="campo" id="h-op-c"><label for="h-op">Operador</label><select id="h-op"></select></div>
+        <div class="campo"><label for="h-eq" id="h-eq-l">Equipo</label><select id="h-eq"></select></div>
+        <button class="boton" type="submit">BUSCAR</button>
+        <div id="h-estado" class="estado"></div>
+      </form>
+      <div id="h-res"></div>
+      <button id="h-csv" class="boton secundario oculto" type="button">Exportar CSV (Excel)</button>
+    </section>
+
+    <!-- Detalle -->
+    <section id="v-detalle" class="vista" hidden>
+      <button class="volver" data-ir="historial" type="button">‹ Historial</button>
+      <div class="tarjeta">
+        <h1 id="d-titulo">Detalle</h1>
+        <dl id="d-datos" class="datos"></dl>
+      </div>
+      <form id="f-corr" class="tarjeta oculto" novalidate>
+        <h2>Corregir un valor</h2>
+        <p class="nota">La corrección queda auditada con usuario, fecha, valor anterior y motivo.</p>
+        <div class="campo"><label for="c-campo">Campo</label><select id="c-campo"></select></div>
+        <div class="campo" id="c-valor-c"></div>
+        <div class="campo"><label for="c-motivo">Motivo</label><textarea id="c-motivo" maxlength="300" required></textarea></div>
+        <button class="boton" type="submit">GUARDAR CORRECCIÓN</button>
+        <div id="c-estado" class="estado"></div>
+      </form>
+      <div id="d-audit" class="tarjeta oculto"><h2>Auditoría del registro</h2><div id="d-audit-l"></div></div>
+    </section>
+
+    <!-- Pendientes -->
+    <section id="v-pendientes" class="vista" hidden>
+      <button class="volver" data-ir="inicio" type="button">‹ Inicio</button>
+      <div class="tarjeta">
+        <h1>Pendientes de sincronización</h1>
+        <p class="nota">Estos registros están solo en este teléfono. Aún NO están guardados en el servidor.</p>
+        <div id="p-lista"></div>
+        <button id="p-sync" class="boton" type="button">REINTENTAR AHORA</button>
+      </div>
+    </section>
+
+    <!-- Cuenta -->
+    <section id="v-cuenta" class="vista" hidden>
+      <button class="volver" data-ir="inicio" type="button">‹ Inicio</button>
+      <form id="f-codigo" class="tarjeta" novalidate autocomplete="off">
+        <h1>Cambiar mi código</h1>
+        <div class="campo"><label for="k-actual">Código actual</label><input id="k-actual" type="password" maxlength="64"></div>
+        <div class="campo"><label for="k-nuevo">Código nuevo (mínimo 6)</label><input id="k-nuevo" type="password" maxlength="64" autocomplete="new-password"></div>
+        <div class="campo"><label for="k-rep">Repetir código nuevo</label><input id="k-rep" type="password" maxlength="64" autocomplete="new-password"></div>
+        <button class="boton" type="submit">CAMBIAR CÓDIGO</button>
+        <div id="k-estado" class="estado"></div>
+      </form>
+      <form id="f-reset" class="tarjeta oculto" novalidate autocomplete="off">
+        <h2>Restablecer código de un usuario</h2>
+        <div class="campo"><label for="x-usuario">Usuario</label><select id="x-usuario"></select></div>
+        <div class="campo"><label for="x-nuevo">Código nuevo (mínimo 6)</label><input id="x-nuevo" type="password" maxlength="64" autocomplete="new-password"></div>
+        <button class="boton secundario" type="submit">RESTABLECER</button>
+        <div id="x-estado" class="estado"></div>
+      </form>
+    </section>
+  </main>
+  <p class="pie">Plan Infra · Registro Operacional · <span id="pie-disp"></span></p>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
+    }
+  </script>
+</body>
+</html>

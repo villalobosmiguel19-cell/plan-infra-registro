@@ -148,6 +148,7 @@ function despachar_(p) {
   if (p.accion === 'usuarios') return { ok: true, usuarios: listaUsuarios_() };
   if (p.accion === 'login') return login_(p);
   if (p.accion === 'consulta') return consulta_(p);
+  if (p.accion === 'corregirPlanInfra') return corregirPlanInfra_(p);
   if (p.accion === 'importar') return importar_(p);
   const s = sesion_(p.token);
   switch (p.accion) {
@@ -289,15 +290,31 @@ function soloSupervisor_(s) {
 
 /** Plan Infra consulta registros con una clave propia (PLANINFRA_CLAVE, mínimo 16 caracteres).
  *  Solo lee: no guarda, no corrige y no toca códigos de usuarios. */
-function consulta_(p) {
+function validarClavePlanInfra_(recibida) {
   const clave = PropertiesService.getScriptProperties().getProperty('PLANINFRA_CLAVE');
   const cache = CacheService.getScriptCache();
   const fallos = Number(cache.get('f_planinfra') || 0);
   if (fallos >= MAX_FALLOS) throw falla_('Demasiados intentos fallidos. Espera 15 minutos.', 'BLOQUEO');
-  if (!clave || clave.length < 16 || String(p.clave || '') !== clave) {
+  if (!clave || clave.length < 16 || String(recibida || '') !== clave) {
     cache.put('f_planinfra', String(fallos + 1), VENTANA_FALLOS);
     throw falla_('Clave de consulta inválida.', 'CREDENCIALES');
   }
+}
+
+/** Corrección de un valor desde Plan Infra (supervisor del PC). Mismas reglas que en la app:
+ *  motivo obligatorio y auditoría con valor anterior. Requiere PLANINFRA_PUEDE_CORREGIR = SI. */
+function corregirPlanInfra_(p) {
+  if (PropertiesService.getScriptProperties().getProperty('PLANINFRA_PUEDE_CORREGIR') !== 'SI') {
+    throw falla_('Las correcciones desde Plan Infra no están habilitadas.', 'PERMISO');
+  }
+  validarClavePlanInfra_(p.clave);
+  const usuario = String(p.usuario || '').replace(/[^A-Za-z0-9._@-]/g, '').slice(0, 40);
+  if (!usuario) throw falla_('Falta el usuario de Plan Infra.');
+  return corregir_({ u: 'planinfra:' + usuario, rol: 'supervisor', nombre: usuario }, p);
+}
+
+function consulta_(p) {
+  validarClavePlanInfra_(p.clave);
   const h = historial_({ u: 'planinfra', rol: 'supervisor', nombre: 'Plan Infra' }, p);
   const cat = catalogo_({ rol: 'operador' });
   return {

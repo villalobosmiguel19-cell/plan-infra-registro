@@ -149,6 +149,7 @@ function despachar_(p) {
   if (p.accion === 'login') return login_(p);
   if (p.accion === 'consulta') return consulta_(p);
   if (p.accion === 'corregirPlanInfra') return corregirPlanInfra_(p);
+  if (p.accion === 'guardarPlanInfra') return guardarPlanInfra_(p);
   if (p.accion === 'importar') return importar_(p);
   const s = sesion_(p.token);
   switch (p.accion) {
@@ -311,6 +312,19 @@ function corregirPlanInfra_(p) {
   const usuario = String(p.usuario || '').replace(/[^A-Za-z0-9._@-]/g, '').slice(0, 40);
   if (!usuario) throw falla_('Falta el usuario de Plan Infra.');
   return corregir_({ u: 'planinfra:' + usuario, rol: 'supervisor', nombre: usuario }, p);
+}
+
+/** Ingreso de un registro nuevo desde Plan Infra (mismas validaciones que la app; el ID único
+ *  lo genera Plan Infra, así un reintento no duplica). Requiere PLANINFRA_PUEDE_CORREGIR = SI. */
+function guardarPlanInfra_(p) {
+  if (PropertiesService.getScriptProperties().getProperty('PLANINFRA_PUEDE_CORREGIR') !== 'SI') {
+    throw falla_('La escritura desde Plan Infra no está habilitada.', 'PERMISO');
+  }
+  validarClavePlanInfra_(p.clave);
+  const usuario = String(p.usuario || '').replace(/[^A-Za-z0-9._@-]/g, '').slice(0, 40);
+  if (!usuario) throw falla_('Falta el usuario de Plan Infra.');
+  const nombre = texto_(p.nombre || usuario, 60, false).replace(/^'/, '');
+  return guardar_({ u: 'planinfra:' + usuario, nombre: nombre, rol: 'supervisor', disp: 'Plan Infra (PC)' }, p);
 }
 
 function consulta_(p) {

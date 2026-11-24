@@ -1,4 +1,4 @@
-/* Plan Infra – Registro Operacional · Aplicación móvil (PWA)
+/* Control Suministros – Registro Operacional · Aplicación móvil (PWA)
  *
  * Reglas:
  *  - Un registro solo se muestra como GUARDADO cuando el servidor confirma su recepción.

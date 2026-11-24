@@ -315,10 +315,13 @@ function corregirPlanInfra_(p) {
 
 function consulta_(p) {
   validarClavePlanInfra_(p.clave);
-  const h = historial_({ u: 'planinfra', rol: 'supervisor', nombre: 'Plan Infra' }, p);
+  const f = FORMS[p.form];
+  if (!f) throw falla_('Formulario desconocido.');
+  // Plan Infra recibe todos los registros (hasta 5000) para mostrar la hoja completa.
+  const regs = filtrar_(f, p.desde, p.hasta, String(p.operador || '').toLowerCase(), String(p.equipo || ''));
   const cat = catalogo_({ rol: 'operador' });
   return {
-    ok: true, total: h.total, registros: h.registros, formularios: cat.formularios,
+    ok: true, total: regs.length, registros: regs.slice(0, 5000), formularios: cat.formularios,
     listas: cat.listas, rangos: cat.rangos, usuarios: listaUsuarios_(), consultado: ahora_(),
   };
 }

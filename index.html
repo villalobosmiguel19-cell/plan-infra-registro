@@ -48,6 +48,7 @@
         <button class="mbtn" data-ir="calderas" type="button"><span class="ico">♨</span>Control de calderas</button>
         <button class="mbtn" data-ir="cloracion" type="button"><span class="ico">⚗</span>Control de cloración</button>
         <button class="mbtn sec" data-ir="historial" type="button"><span class="ico">☰</span>Historial</button>
+        <button class="mbtn sec" data-ir="graficos" type="button"><span class="ico">📈</span>Gráficos de tendencia</button>
         <button class="mbtn sec" data-ir="pendientes" type="button"><span class="ico">⟳</span>Pendientes <b id="i-pend"></b></button>
         <button class="mbtn sec" data-ir="cuenta" type="button"><span class="ico">⚿</span>Mi cuenta</button>
         <a id="i-hoja" class="mbtn sec oculto" target="_blank" rel="noopener"><span class="ico">▦</span>Abrir hoja de cálculo</a>
@@ -95,6 +96,30 @@
       </form>
       <div id="h-res"></div>
       <button id="h-csv" class="boton secundario oculto" type="button">Exportar CSV (Excel)</button>
+    </section>
+
+    <!-- Gráficos de tendencia -->
+    <section id="v-graficos" class="vista" hidden>
+      <button class="volver" data-ir="inicio" type="button">‹ Inicio</button>
+      <form id="f-graf" class="tarjeta" novalidate>
+        <h1>Gráficos de tendencia</h1>
+        <div class="seg" role="tablist">
+          <button type="button" data-gform="calderas" class="activo">Calderas</button>
+          <button type="button" data-gform="cloracion">Cloración</button>
+        </div>
+        <div class="campo"><label for="g-param">Parámetro</label><select id="g-param"></select></div>
+        <div class="fila2">
+          <div class="campo"><label for="g-desde">Desde</label><input id="g-desde" type="date"></div>
+          <div class="campo"><label for="g-hasta">Hasta</label><input id="g-hasta" type="date"></div>
+        </div>
+        <button class="boton" type="submit">VER GRÁFICO</button>
+        <div id="g-estado" class="estado"></div>
+      </form>
+      <div id="g-res" class="tarjeta oculto">
+        <div id="g-series" class="series"></div>
+        <div class="grafico"><canvas id="g-canvas"></canvas></div>
+        <p id="g-resumen" class="nota"></p>
+      </div>
     </section>
 
     <!-- Detalle -->

@@ -74,6 +74,7 @@
     if (!st.sesion && vista !== 'login') vista = 'login';
     if (vista === 'calderas' || vista === 'cloracion') { abrirFormulario(vista); vista = 'form'; }
     if (vista === 'historial') prepararHistorial();
+    if (vista === 'graficos') prepararGraficos();
     if (vista === 'pendientes') pintarPendientes();
     if (vista === 'cuenta') prepararCuenta();
     if (vista === 'inicio') pintarInicio();
@@ -150,16 +151,28 @@
     st.form = form;
     $('r-titulo').textContent = f.titulo;
     $('r-operador').value = st.sesion.nombre;
-    $('r-campos').innerHTML = f.campos.map((c) => {
+    const campoHtml = (c) => {
       const id = 'c_' + c.k;
-      const lbl = '<label for="' + id + '">' + esc(c.l) + (c.req ? ' <span class="req">*</span>' : '') + '</label>';
+      const lbl = '<label for="' + id + '">' + esc(c.g ? c.lc : c.l) + (c.req ? ' <span class="req">*</span>' : '') + '</label>';
       if (c.t === 'lista') {
         const ops = (st.cat.listas[c.lista] || []).map((o) => '<option>' + esc(o) + '</option>').join('');
         return '<div class="campo">' + lbl + '<select id="' + id + '" data-k="' + c.k + '"><option value="">Selecciona…</option>' + ops + '</select></div>';
       }
       return '<div class="campo">' + lbl + '<input id="' + id + '" data-k="' + c.k + '" type="text" inputmode="decimal" maxlength="20" autocomplete="off">' +
-        '<span class="ayuda" id="a_' + c.k + '"></span><span class="aviso oculto" id="w_' + c.k + '"></span></div>';
-    }).join('');
+        '<span class="ayuda" id="a_' + c.k + '">' + (c.s ? 'Se suma en los gráficos' : '') + '</span><span class="aviso oculto" id="w_' + c.k + '"></span></div>';
+    };
+    // Los campos con grupo (punto de medición) se agrupan en un recuadro por punto.
+    let html = '', grupo = '';
+    f.campos.forEach((c) => {
+      if ((c.g || '') !== grupo) {
+        if (grupo) html += '</div></fieldset>';
+        grupo = c.g || '';
+        if (grupo) html += '<fieldset class="grupo"><legend>' + esc(grupo) + '</legend><div class="fila2">';
+      }
+      html += campoHtml(c);
+    });
+    if (grupo) html += '</div></fieldset>';
+    $('r-campos').innerHTML = html;
     // Recuperar borrador si la app se cerró a mitad de un registro.
     const b = leer(K.bor + form, null);
     $('r-fecha').value = (b && b.fechaRegistro) || ahoraLocal();
@@ -180,7 +193,7 @@
     if (!st.form) return;
     const f = st.cat.formularios[st.form];
     const equipo = ($('c_' + f.equipo) || {}).value || '';
-    f.campos.filter((c) => c.t === 'num').forEach((c) => {
+    f.campos.filter((c) => c.t === 'num' && !c.s).forEach((c) => {
       const r = rangoDe(st.form, c.k, equipo);
       const v = $('c_' + c.k).value.trim().replace(',', '.');
       $('a_' + c.k).textContent = r ? 'Rango configurado: ' + textoRango(r) : '';
@@ -346,6 +359,134 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }
 
+  // ── Gráficos de tendencia (datos de toda la planta) ──
+  const COLORES = ['#0B2545', '#1E8E3E', '#B3261E', '#8A5A00', '#6A1B9A', '#00838F', '#EF6C00'];
+  let grafico = null;
+
+  function cargarChartJs() {
+    if (window.Chart) return Promise.resolve();
+    return new Promise((ok, falla) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';
+      s.onload = ok;
+      s.onerror = () => falla(new Error('No se pudo cargar la librería de gráficos (requiere conexión).'));
+      document.head.appendChild(s);
+    });
+  }
+
+  /** Parámetros graficables. Calderas: un parámetro con una serie por punto (campos con grupo).
+   *  Cloración: un parámetro por campo, con una serie por punto de medición (valor del campo equipo). */
+  function parametrosDe(form) {
+    const nums = st.cat.formularios[form].campos.filter((c) => c.t === 'num');
+    if (nums.some((c) => c.g)) {
+      const m = new Map();
+      nums.forEach((c) => {
+        if (!m.has(c.lc)) m.set(c.lc, { etiqueta: c.lc, suma: c.s, series: [] });
+        m.get(c.lc).series.push({ nombre: c.g, clave: c.k });
+      });
+      return Array.from(m.values());
+    }
+    return nums.map((c) => ({ etiqueta: c.l, suma: c.s, campo: c.k }));
+  }
+
+  function prepararGraficos() {
+    st.gForm = st.gForm || 'calderas';
+    document.querySelectorAll('#f-graf .seg button').forEach((b) => b.classList.toggle('activo', b.dataset.gform === st.gForm));
+    $('g-param').innerHTML = parametrosDe(st.gForm).map((p, i) => '<option value="' + i + '">' + esc(p.etiqueta) + (p.suma ? ' · acumulado' : '') + '</option>').join('');
+    if (!$('g-desde').value) $('g-desde').value = hoyMenos(30);
+    if (!$('g-hasta').value) $('g-hasta').value = hoyMenos(0);
+    st.gOcultas = new Set();
+  }
+
+  async function verGrafico(ev) {
+    if (ev) ev.preventDefault();
+    const form = st.gForm;
+    const p = parametrosDe(form)[Number($('g-param').value) || 0];
+    estado('g-estado', 'enviando', 'Cargando datos…');
+    try {
+      await cargarChartJs();
+      const r = await api('tendencia', { form: form, desde: $('g-desde').value, hasta: $('g-hasta').value });
+      if (!r.ok) { estado('g-estado', 'error', r.error || 'No se pudo cargar.'); return; }
+      estado('g-estado');
+      st.gDatos = { r: r, p: p, form: form };
+      st.gOcultas = new Set();
+      pintarGrafico();
+    } catch (e) { estado('g-estado', 'error', 'No se pudo cargar el gráfico.', e.message); }
+  }
+
+  function pintarGrafico() {
+    const d = st.gDatos;
+    if (!d) return;
+    const f = st.cat.formularios[d.form];
+    const regs = d.r.registros;
+    const etiquetas = regs.map((x) => x.fecha.slice(0, 16));
+    const num = (v) => (v === '' || v == null || isNaN(Number(v)) ? null : Number(v));
+    let series;
+    if (d.p.series) {
+      series = d.p.series.map((s) => ({ nombre: s.nombre, equipo: '', clave: s.clave, valores: regs.map((x) => num(x.valores[s.clave])) }));
+    } else {
+      const equipos = Array.from(new Set(regs.map((x) => String(x.valores[f.equipo] || '')))).filter(Boolean);
+      series = equipos.map((e) => ({ nombre: e, equipo: e, clave: d.p.campo,
+        valores: regs.map((x) => (String(x.valores[f.equipo]) === e ? num(x.valores[d.p.campo]) : null)) }));
+    }
+    series = series.filter((s) => s.valores.some((v) => v !== null));
+    const lineas = [];
+    let fueraTotal = 0;
+    const resumen = [];
+    series.forEach((s, i) => {
+      const color = COLORES[i % COLORES.length];
+      if (st.gOcultas.has(s.nombre)) return;
+      let valores = s.valores;
+      let puntoColor = color;
+      if (d.p.suma) {
+        // Consumo: se va sumando dentro del período elegido.
+        let acc = 0;
+        valores = s.valores.map((v) => (v === null ? null : (acc += v)));
+        resumen.push(s.nombre + ': ' + Math.round(acc * 100) / 100);
+      } else {
+        const rg = rangoDe(d.form, s.clave, s.equipo);
+        if (rg) {
+          puntoColor = valores.map((v) => {
+            const fuera = v !== null && ((rg.min != null && v < rg.min) || (rg.max != null && v > rg.max));
+            if (fuera) fueraTotal++;
+            return fuera ? '#B3261E' : color;
+          });
+          const visibles = series.filter((x) => !st.gOcultas.has(x.nombre)).length;
+          if (visibles === 1) {
+            if (rg.min != null) lineas.push({ label: 'Mínimo', data: etiquetas.map(() => rg.min), borderColor: '#B3261E', borderDash: [6, 4], pointRadius: 0, borderWidth: 1.5 });
+            if (rg.max != null) lineas.push({ label: 'Máximo', data: etiquetas.map(() => rg.max), borderColor: '#B3261E', borderDash: [6, 4], pointRadius: 0, borderWidth: 1.5 });
+          }
+        }
+      }
+      lineas.unshift({ label: s.nombre, data: valores, borderColor: color, backgroundColor: color, pointBackgroundColor: puntoColor,
+        pointBorderColor: puntoColor, pointRadius: 3, borderWidth: 2, spanGaps: true, tension: 0.2 });
+    });
+    $('g-series').innerHTML = series.map((s, i) => '<label class="chip-serie" style="--c:' + COLORES[i % COLORES.length] + '"><input type="checkbox" data-serie="' +
+      esc(s.nombre) + '"' + (st.gOcultas.has(s.nombre) ? '' : ' checked') + '> ' + esc(s.nombre) + '</label>').join('');
+    $('g-res').classList.remove('oculto');
+    if (grafico) grafico.destroy();
+    if (!series.length) {
+      $('g-resumen').textContent = 'No hay datos de «' + d.p.etiqueta + '» en el período.';
+      grafico = null;
+      return;
+    }
+    grafico = new window.Chart($('g-canvas'), {
+      type: 'line',
+      data: { labels: etiquetas, datasets: lineas },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { display: false }, tooltip: { filter: (it) => it.raw !== null } },
+        scales: { x: { ticks: { maxTicksLimit: 6, maxRotation: 0 } }, y: { title: { display: true, text: d.p.etiqueta + (d.p.suma ? ' acumulado' : '') } } },
+      },
+    });
+    const texto = [regs.length + ' registro(s) en el período'];
+    if (d.p.suma) texto.push('Acumulado del período · ' + resumen.join(' · '));
+    else if (fueraTotal) texto.push(fueraTotal + ' valor(es) fuera del rango configurado (en rojo)');
+    else if (!(d.r.rangos || []).some((x) => x.form === d.form)) texto.push('Sin rangos configurados para este formulario');
+    $('g-resumen').textContent = texto.join(' · ');
+  }
+
   // ── Detalle y corrección ──
   function verDetalle(x) {
     st.detalle = x;
@@ -448,8 +589,9 @@
     if (!st.cat) st.sesion = null;
 
     document.addEventListener('click', (ev) => {
-      const t = ev.target.closest('[data-ir],[data-ver],[data-descartar],[data-form]');
+      const t = ev.target.closest('[data-ir],[data-ver],[data-descartar],[data-form],[data-gform]');
       if (!t) return;
+      if (t.dataset.gform) { st.gForm = t.dataset.gform; st.gDatos = null; prepararGraficos(); $('g-res').classList.add('oculto'); return; }
       if (t.dataset.ir) ir(t.dataset.ir);
       else if (t.dataset.ver) verDetalle(st.hist[Number(t.dataset.ver)]);
       else if (t.dataset.descartar) {
@@ -462,6 +604,19 @@
     $('f-reg').addEventListener('change', () => { revisarRangos(); guardarBorrador(); });
     $('f-hist').addEventListener('submit', buscar);
     $('h-csv').addEventListener('click', exportarCsv);
+    $('f-graf').addEventListener('submit', verGrafico);
+    $('g-param').addEventListener('change', () => {
+      if (!st.gDatos) return;
+      st.gDatos.p = parametrosDe(st.gForm)[Number($('g-param').value) || 0];
+      st.gOcultas = new Set();
+      pintarGrafico();
+    });
+    $('g-series').addEventListener('change', (ev) => {
+      const n = ev.target.dataset.serie;
+      if (!n) return;
+      if (ev.target.checked) st.gOcultas.delete(n); else st.gOcultas.add(n);
+      pintarGrafico();
+    });
     $('c-campo').addEventListener('change', campoCorreccion);
     $('f-corr').addEventListener('submit', corregir);
     $('f-codigo').addEventListener('submit', cambiarCodigo);

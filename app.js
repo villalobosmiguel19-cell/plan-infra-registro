@@ -477,7 +477,7 @@
         responsive: true, maintainAspectRatio: false, animation: false,
         interaction: { mode: 'index', intersect: false },
         plugins: { legend: { display: false }, tooltip: { filter: (it) => it.raw !== null } },
-        scales: { x: { ticks: { maxTicksLimit: 6, maxRotation: 0 } }, y: { title: { display: true, text: d.p.etiqueta + (d.p.suma ? ' acumulado' : '') } } },
+        scales: { x: { ticks: { maxTicksLimit: 5, maxRotation: 0, callback: function (v) { return String(this.getLabelForValue(v)).slice(0, 5); } } }, y: { title: { display: true, text: d.p.etiqueta + (d.p.suma ? ' acumulado' : '') } } },
       },
     });
     const texto = [regs.length + ' registro(s) en el período'];
